@@ -611,6 +611,627 @@ function setquality(who, bow)
   else
     bow.name := "an exceptional " + tname;
   endif
+use cfgfile;
+use uo;
+use os;
+use util;
+
+include "include/client";
+include ":attributes:attributes";
+include "include/string";
+include "include/objtype";
+include "include/canAccess";
+include "include/utility";
+include ":itemutils:toolWear";
+include ":virtue:noto";
+include ":damage:damage";
+include ":resourcecore:resourceCore";
+include ":resourcecore:wood";
+
+
+
+const UACTION_CHOP := 0x0d;
+//const FX_POISON_GAS := 0x113a;
+var bowcraftconfigfile := ReadConfigFile("::bowcraft");
+var mex;
+var mey;
+
+program use_axe(me, axe)
+  EraseObjProperty(me, "IsMeditating");
+  EraseObjProperty(me, "HealTimer");
+  if(!can_access(me, axe))
+    return;
+  endif
+  if(!ReserveItem(axe))
+    return;
+  endif
+  if(!IsAxEquipped(me, axe))
+    SendSysMessage(me,"You have to equip that to lumberjack!");
+    return;
+  endif
+  var tree := TreeNearby(me, axe);
+  if(!tree)
+    return;
+  endif
+  SendSysMessage(me, "You begin chopping...");
+  var checker := 0;
+  mex := me.x;
+  mey := me.y;
+  var mount;
+
+/*
+  repeat
+    mount := GetEquipmentByLayer(me, 25);
+    if(mount)
+      SendSysMessage(me,"you cannot chop wood while on horseback.");
+      return;
+    endif
+    if(!axe)
+      return;
+    endif
+    PerformAction(me, UACTION_CHOP);
+    PlaySoundEffect(me, SFX_SKILL_LUMBERJACK);
+    sleepms(2500);
+    checker := Do_Chops(me, axe, tree);
+    //checker := AXE_HarvestResource( me, tree );
+  until(checker == 1);
+*/
+    AXE_HarvestResource( me, tree );
+endprogram
+
+function Do_Chops(me, axe, tree)
+  var logtype := GetObjtypeByName( GetConfigString( FindConfigElem( ReadConfigFile(":resourcecore:trees"), tree.objtype), "LogType" ) );
+  var difficulty := GetHarvestDifficulty("wood", tree.x, tree.y, tree.objtype);
+
+  SendSysMessage(me, "Harvestdifficulty: " + difficulty + " Logtype: " + logtype );
+
+  if(difficulty == error)
+    SendSysMessage(me, "There's not enough wood here to chop");
+    return 1;
+  endif
+  if((me.x != mex) || (me.y != mey))
+    SendSysMessage(me,"You stop chopping.");
+    return 1;
+  endif
+  var points := CInt((AP_GetSkill(me, LUMBERJACKING) * 2) + 10);
+  //var logtypename := GetConfigString( CInt(logtype), "Desc" );
+  var logtypename := GetConfigString( FindConfigElem( ReadConfigFile(":logs:itemdesc"), logtype), "Desc" );
+
+  //broadcast( "Logtypename: " + logtypename );
+
+  if(SkillCheck(me, LUMBERJACKING, difficulty, points) > 0)
+    var wood_amount := HarvestResource( "wood", tree.x, tree.y, 1, 10 );
+    if(wood_amount == 0)
+      SendSysMessage(me, "There's not enough wood here to chop.");
+      return 1;
+    endif
+    if(!CreateItemInBackpack(me, logtype, wood_amount))
+      SendSysMessage(me, "Your backpack is too full.");
+      return 1;
+    else
+      SendSysMessage(me, "You put some " + StrReplace(logtypename, "%", "") + " in your backpack");
+      CheckToolWear (me, axe, LUMBERJACKING);
+      return 0;
+    endif
+  else
+    SendSysMessage(me, "You fail to get any usable wood.");
+    return 0;
+  endif
+endfunction
+
+function TreeNearby(me, axe)
+  SendSysMessage( me, "Select something to chop." );
+  var tree := TargetCoordinates( me );
+  if(!tree)
+    SendSysMessage(me, "Cancelled");
+    return 0;
+  endif
+  var distt := CoordinateDistance( me.x, me.y, tree.x, tree.y );
+  if(distt > 1 )
+    if(!tree.item.container)
+      SendSysMessage(me,"That is too far away");
+      return 0;
+    endif
+  endif
+  if(is_furniture(tree.item.objtype, tree.item))
+    chopfurniture(me, tree.item);
+    return 0;
+  elseif(is_tree(tree.objtype))
+//    var logtype := CInt(is_tree(tree.objtype));
+//    SendSysMessage(me, "You are targetting logtype: " + logtype + "from treetype: " + tree.objtype);
+
+    var difficulty := GetHarvestDifficulty("wood", tree.x, tree.y, tree.objtype);
+//    broadcast( "Harvestdifficulty: " + difficulty );
+    if(difficulty == error)
+      SendSysMessage(me, "There's not enough wood here to chop.");
+      return 0;
+    endif
+    return tree;
+  else
+    use_blade(me, axe, tree.item);
+    return 0;
+  endif
+endfunction
+
+function is_furniture(theobj, thing)
+  var miscobjtypes := { 0x17007, 0xA30, 0xA34, 0xA38, 0xFAE, 0x19E40};
+  if((theobj >= 0x9a8) && (theobj <= 0x9ab))
+    return 1;
+  elseif((theobj >= 0xa2a) && (theobj <= 0xa2c))
+    return 1;
+  elseif((theobj >= 0xa4c) && (theobj <= 0xa53))
+    return 1;
+  elseif((theobj >= 0xa97) && (theobj <= 0xa9e))
+    return 1;
+  elseif((theobj >= 0xb2c) && (theobj <= 0xb40))
+    return 1;
+  elseif((theobj >= 0xb49) && (theobj <= 0xb90))
+    return 1;
+  elseif((theobj >= 0xe3c) && (theobj <= 0xe43))
+    return 1;
+  elseif((theobj >= 0xe7c) && (theobj <= 0xe80))
+    return 1;
+  elseif((theobj >= 0xf65) && (theobj <= 0xf77))
+    return 1;
+  elseif(theobj in miscobjtypes)
+    return 1;
+  elseif(GetObjProperty(thing, "ItemsCreatedSerials"))
+    return 1;
+  else
+    return 0;
+  endif
+endfunction
+
+function is_tree(theobj)
+// NOTE: normal tree log is: 0x1bdd
+
+	var treeconfigfile := ReadConfigFile(":resourcecore:trees");
+	var tree := FindConfigElem( treeconfigfile, theobj );
+	var logtype := GetConfigString( tree, "LogType" );
+	var logtypeobj := GetObjtypeByName( logtype );
+
+        //broadcast("target: " + theobj + " tree: " + tree + " logtype: " + logtype + " logtypeobj: " + logtypeobj);
+
+        return logtypeobj;
+
+
+/*
+        if ((theobj >= 0x0c99) and (theobj <= 0x0c9d))		// Small palm
+                return 0x1bdd;
+//        elseif (theobj == 0x0c9e)				// Small tree
+//                return 0x1bdd;
+//        elseif ((theobj >= 0x0c9f) and (theobj <= 0x0ca5))	// Plants and flowers
+//                return 0x1bdd;
+        elseif (theobj == 0x0ca6)				// Ponytail palm
+                return 0x1bdd;
+//        elseif ((theobj == 0x0ca7) or (theobj == 0x0ca9))		// Plants and flowers
+//                return 0x1bdd;
+        elseif ((theobj == 0x0ca8) or (theobj == 0x0caa) or (theobj == 0x0cab)) // Banana
+                return 0x26302;
+//        elseif ((theobj >= 0x0cac) and (theobj <= 0x0cc8))	// Plants and flowers
+//                return 0x705a;
+        elseif ((theobj >= 0x0cc9) and (theobj <= 0x0cd5))	// Normal tree and leaves
+                return 0x705a;
+        elseif ((theobj >= 0x0cd6) and (theobj <= 0x0cd9))	// Cedar
+                return 0x26304;
+        elseif ((theobj >= 0x0cda) and (theobj <= 0x0cdf))	// Oak
+                return 0x2630F;
+        elseif ((theobj >= 0x0ce0) and (theobj <= 0x0ce5))	// Walnut
+                return 0x26318;
+        elseif (((theobj >= 0x0ce6) and (theobj <= 0x0ce8)) or ((theobj >= 0x224A) and (theobj <=0x224B)))	// Willow
+                return 0x26319;
+        elseif ((theobj >= 0x0ce9) and (theobj <= 0x0cea))	// Sapling
+                return 0x1bdd;
+//        elseif ((theobj >= 0x0cf3) and (theobj <= 0x0cf7))	// Fallen log
+//                return ;
+        elseif (((theobj >= 0x0cf8) and (theobj <= 0x0cf9)) or ((theobj >= 0x0cfa) and (theobj <= 0x0d03)))	// Cypress
+                return 0x26307;
+        elseif ((theobj >= 0x0d37) and (theobj <= 0x0d38))	// Yucca
+                return 0x2631B;
+        elseif ((theobj >= 0x0d41) and (theobj <= 0x0d93))	// Big tropical tree and leaves
+                return 0x1bdd;
+        elseif ((theobj >= 0x0d94) and (theobj <= 0x0d9b))	// Apple
+                return 0x26300;
+        elseif ((theobj >= 0x246C) and (theobj <= 0x2470))      // Bamboo
+                return 0x1bdd;
+	elseif ((theobj >= 0x2471) and (theobj <= 0x2477))      // Cherry
+                return 0x26305;
+        elseif (theobj == 0x0C95)                               // Coconut
+                return 0x26306;
+        elseif (theobj == 0x0C96)                               // Date
+                return 0x26308;
+        elseif ((theobj >= 0x2478) and (theobj <= 0x247E))      // Maple
+                return 0x2630E;
+        elseif (theobj == 0x0C9E)                               // Ohii
+                return 0x26310;
+        elseif ((theobj >= 0x0d9c) and (theobj <= 0x0da3))	// Peach
+                return 0x26311;
+        elseif ((theobj >= 0x0da4) and (theobj <= 0x0dab))	// Pear
+                return 0x26312;
+        elseif ((theobj >= 0x26ED) and (theobj <= 0x26F3))      // Plum
+                return 0x26310;
+        elseif ((theobj >= 0x0CC9) and (theobj <= 0x0CC9))      // Spider Tree
+                return 0x26316;
+        elseif ((theobj >= 0x12b6) and (theobj <= 0x12c7))	// Yew tree
+                return 0x2631A;
+        else
+                return 0;
+        endif
+*/
+endfunction
+
+//function is_tree(theobj)
+//  if((theobj >= 0x0c99) && (theobj <= 0x0cea))
+//    return 1;
+//  elseif((theobj >= 0x0cf3) && (theobj <= 0x0d03))
+//    return 1;
+//  elseif((theobj >= 0x0d41) && (theobj <= 0x0dab))
+//    return 1;
+//  elseif((theobj >= 0x12b6) && (theobj <= 0x12c7))
+//    return 1;
+//  elseif((theobj >= 0x0d37) && (theobj <= 0x0d38))
+//    return 1;
+//  elseif((theobj == 0x0c9e) || (theobj == 0x0ca8) || (theobj == 0x0caa) || (theobj == 0x0cab))
+//    return 1;
+//  else
+//    return 0;
+//  endif
+//endfunction
+
+
+function IsAxEquipped(me,axe)
+  if((!Accessible(me,axe)) || (Distance(me, axe) > 1))
+    return 0;
+  endif
+  foreach item in ListEquippedItems(me)
+    if (axe.serial == item.serial )
+      return 1;
+    endif
+  endforeach
+  return EquipItem(me, axe );
+endfunction
+
+function chopfurniture(me, theobj)
+  if(!can_access(me, theobj))
+    return;
+  endif
+  var sign;
+  if(GetObjProperty(theobj, "lockeddown") || GetObjProperty(theobj, "secure"))
+    SendSysMessage(me, "You cannot destroy secure or locked down items.");
+    return;
+  endif
+  if(theobj.objtype == 0x17007)
+    var houseserial := GetObjProperty(theobj, "houseserial");
+    sign := SystemFindObjectBySerial(houseserial);
+    if(GetObjProperty(sign, "barrelserial") == theobj.serial)
+      EraseObjProperty(sign, "barrelserial");
+      SendSysMessage(me, "you cannot destroy that while it is locked down.");
+      return;
+    endif
+  endif
+  if(!Accessible(me, theobj))
+    SendSysMessage(me, "you cant reach that");
+    return;
+  endif
+  if(me.multi)
+    if(GetObjProperty((me.multi), "ownerserial") != me.serial)
+      var house := me.multi;
+      foreach thing in (house.components)
+        if((thing.objtype == 0x0bd0) || (thing.objtype == 0x0bd2))
+          sign := thing;
+          break;
+        endif
+      endforeach
+      var coowner := 0;
+      var coownerlist := GetObjProperty(sign, "coownerlist");
+      foreach thing in coownerlist
+        if(thing == me.serial)
+          coowner := 1;
+          break;
+        endif
+      endforeach
+      if(!coowner)
+        SendSysMessage(me, "this does not belong to you!");
+        return;
+      endif
+    endif
+  endif
+  foreach thing in EnumerateItemsInContainer(theobj)
+    if(theobj.container)
+      MoveItemToContainer(thing, theobj.container);
+    else
+      MoveObjectToLocation(thing, theobj.x, theobj.y, theobj.z, theobj.realm, MOVEOBJECT_FORCELOCATION);
+    endif
+  endforeach
+  var created := GetObjProperty(theobj, "ItemsCreatedSerials");
+  if(created)
+    var holder;
+    foreach thing in created
+      holder := SystemFindObjectBySerial(thing);
+      if(holder)
+        DestroyItem(holder);
+      endif
+    endforeach
+  else
+    DestroyItem(theobj);
+  endif
+  PlaySoundEffect(me, 0x13a);
+  return;
+endfunction
+
+function use_blade(who, blade, use_on)
+  if(!can_access(who,use_on))
+    return;
+  endif
+  if(!ReserveItem(use_on))
+    return;
+  endif
+  var checkme := use_on.objtype;
+//  if((checkme == UOBJ_LOG) || (checkme == 0x1bd7))
+//    CarveLogs(who, blade, use_on);
+  if(use_on.npctemplate == "sheep")
+    process_wool(who, blade, use_on);
+  elseif(use_on.objtype == UOBJ_CORPSE)
+    ReleaseItem(blade);
+    Carve_Corpse(who, use_on);
+  elseif(is_fish(checkme))
+    CarveFish(who, blade, use_on);
+  else
+    SendSysMessage(who, "I don't know how to use those items together.");
+  endif
+endfunction
+
+function process_wool(who, blade, sheep)
+  if(sheep.graphic == 207)
+    sheep.graphic := 223;
+    CreateItemInContainer(who.backpack, 0x1f125, 3);
+    CheckToolWear (who, blade, TAILORING);
+  else
+    SendSysMessage(who,"That sheep is not yet ready to be shorn.");
+  endif
+endfunction
+
+function is_fish(theobj)
+  if((theobj >= UOBJ_FISH_START) && (theobj <= UOBJ_FISH_END) )
+    return 1;
+  elseif ((theobj >= UOBJ_SFISH_START) && (theobj <= UOBJ_SFISH_END))
+    return 1;
+  else
+    return 0;
+  endif
+endfunction
+
+function CarveFish(who, blade, use_on)
+  if((!ReserveItem(use_on)) || (use_on.movable == 0))
+    SendSysMessage(who, "You cannot use that.");
+    return;
+  endif
+  var num_steaks := (4 * use_on.amount);
+  PlaySoundEffect(who, SFX_57);
+  if(DestroyItem(use_on))
+    CreateItemInBackpack(who, UOBJ_FISHSTEAK, num_steaks);
+    CheckToolWear (who, blade, FISHING);
+    SendSysMessage(who, "You carve the fish steaks and put them in your backpack");
+  endif
+  sleep(1);
+endfunction
+
+function Carve_Corpse(who, cadaver)
+  Detach();
+  if((!Accessible(who, cadaver)) or (!CheckLineOfSight(who, cadaver)))
+    SendSysMessage(who, "You cannot use that");
+    return;
+  endif
+  if(Distance(who, cadaver) > 2)
+    SendSysMessage(who, "You are not close enough");
+    return;
+  endif
+  var c_type := cadaver.corpsetype;
+  if(GetObjProperty(cadaver, "cut") == "1")
+    SendSysMessage( who, "You cannot get any more from this corpse." );
+    foreach thing in EnumerateItemsInContainer(cadaver)
+      MoveObjectToLocation(thing, cadaver.x, cadaver.y, cadaver.z, cadaver.realm, MOVEOBJECT_FORCELOCATION);
+    endforeach
+    DestroyItem(cadaver);
+  elseif((c_type == 400) || (c_type == 401))
+    var beardlist := {0x203e, 0x203f, 0x2040, 0x2041, 0x204b, 0x204c, 0x204d };
+    var hairlist  := {0x2044, 0x2045, 0x2046, 0x2047, 0x2048, 0x2049, 0x204a, 0x203b, 0x203c, 0x203d };
+    foreach thing in EnumerateItemsInContainer(cadaver)
+      if((thing.objtype in hairlist) or (thing.objtype in beardlist))
+        DestroyItem(thing);
+      else
+        MoveObjectToLocation(thing, cadaver.x, cadaver.y, cadaver.z, cadaver.realm, MOVEOBJECT_FORCELOCATION);
+      endif
+    endforeach
+    var partsarray := {};
+    var part;
+    part := CreateItemAtLocation(cadaver.x-1, cadaver.y, cadaver.z, 0x1da0, 1);
+    partsarray.append(part);
+    SetObjProperty(part, "serial", GetObjProperty(cadaver, "serial"));
+    var aname := cadaver.name;
+    aname["A corpse of"] := "";
+    part.name := "The head of " + aname;
+    part := CreateItemAtLocation(cadaver.x-1, cadaver.y, cadaver.z, 0x1da1, 1);
+    partsarray.append(part);
+    part := CreateItemAtLocation(cadaver.x-1, cadaver.y+1, cadaver.z, 0x1da2, 1);
+    partsarray.append(part);
+    part := CreateItemAtLocation(cadaver.x+1, cadaver.y, cadaver.z, 0x1da3, 1);
+    partsarray.append(part);
+    part := CreateItemAtLocation(cadaver.x+1, cadaver.y+1, cadaver.z, 0x1da4, 1);
+    partsarray.append(part);
+    part := CreateItemAtLocation(cadaver.x, cadaver.y, cadaver.z, 0x1d9f, 1);
+    partsarray.append(part);
+    var blood := CreateItemAtLocation(cadaver.x, cadaver.y, cadaver.z, 0x122a, 1);
+    blood.movable := 0;
+    DestroyItem(cadaver);
+    sleep(40);
+    foreach thing in partsarray
+      if(!thing.container)
+        DestroyItem(thing);
+      endif
+    endforeach
+    sleep(20);
+    DestroyItem(blood);
+  else
+    if(c_type == 223)
+      CreateItemInContainer(cadaver, 0x9f1, 2);
+      SendSysMessage(who, "You place the items on the corpse.");
+      var theblood := CreateItemAtLocation(cadaver.x, cadaver.y, cadaver.z, UOBJ_BLOOD, 1);
+      sleep(30);
+      DestroyItem(cadaver);
+      sleep(30);
+      DestroyItem(theblood);
+      return;
+    endif
+    var conf := ReadConfigFile(":*:npcdesc");
+    var tmplate := GetObjProperty(cadaver, "npctemplate");
+    if(!tmplate)
+      SendSysMessage(who, "You cut the corpse, but fail to find anything useful.", 3, 40);
+      var theblood := CreateItemAtLocation(cadaver.x, cadaver.y, cadaver.z, UOBJ_BLOOD, 1);
+      sleep(30);
+      DestroyItem(cadaver);
+      sleep(30);
+      DestroyItem(theblood);
+      return;
+    else
+      SetObjProperty(cadaver, "cut","1");
+      var corpseitm := conf[tmplate]."corpseitm";
+      var corpseamt := conf[tmplate]."corpseamt";
+      print("I: " + corpseitm);
+      print("A: " + corpseamt);
+      if(!corpseitm)
+        print("error");
+        var theblood := CreateItemAtLocation(cadaver.x, cadaver.y, cadaver.z, UOBJ_BLOOD, 1);
+        sleep(30);
+        DestroyItem(cadaver);
+        sleep(30);
+        DestroyItem(theblood);
+        return;
+      endif
+      var i := 1;
+      corpseitm := SplitWords(corpseitm);
+      corpseamt := SplitWords(corpseamt);
+      foreach thing in corpseitm
+        CreateItemInContainer(cadaver, thing, Cint(corpseamt[i]));
+        i := i + 1;
+      endforeach
+      SendSysMessage(who, "You place the items on the corpse.");
+      var theblood := CreateItemAtLocation(cadaver.x, cadaver.y, cadaver.z, UOBJ_BLOOD, 1);
+      sleep(30);
+      DestroyItem(cadaver);
+      sleep(30);
+      DestroyItem(theblood);
+    endif
+  endif
+endfunction
+
+// this needs to go
+/*
+function CarveLogs(who, blade, logs)
+  if(logs.movable == 0)
+    SendSysMessage(who, "You cannot use those logs.");
+    return;
+  endif
+  if(!Accessible(who, logs))
+    SendSysMessage(who, "You cannot use that");
+    return;
+  endif
+  if(!logs.container)
+    if(Distance(who, logs) > 2)
+      SendSysMessage(who, "That is too far away");
+      return;
+    endif
+  endif
+  var selection := SelectMenuItem2(who, "BowcraftCarving");
+  if(!selection)
+    return;
+  endif
+  var what := selection.objtype;
+  if(!Accessible(who, logs))
+    SendSysMessage(who, "I can't access the logs to make that.");
+    return;
+  endif
+  var objectconfig := FindConfigElem(bowcraftconfigfile, what);
+  if(!objectconfig)
+    return;
+  endif
+  var material := CInt(GetConfigString(objectconfig, "Material"));
+  if(material > logs.amount)
+    SendSysMessage(who, "You don't have enough logs to make that.");
+    return;
+  endif
+  var difficulty := GetConfigInt(objectconfig, "Difficulty");
+  var pointvalue := GetConfigInt(objectconfig, "PointValue");
+  var bow := 0;
+  Detach();
+  PlaySoundEffect(who, 0x5a);
+  PerformAction(who, 0x021);
+  sleep(2);
+  PlaySoundEffect(who, 0x5a);
+  PerformAction(who, 0x021);
+  sleep(2);
+  PlaySoundEffect(who, 0x5a);
+  PerformAction(who, 0x021);
+  sleep(2);
+  PlaySoundEffect(who, 0x5a);
+  PerformAction(who, 0x021);
+  sleep(2);
+  if(SkillCheck(who, BOWCRAFT_FLETCHING, difficulty, pointvalue) > 0)
+    if(what == UOBJ_SHAFTS)
+      var amt := logs.amount;
+      if(DestroyItem(logs))
+        CreateItemInBackpack(who, what, amt);
+        CheckToolWear (who, blade, BOWCRAFT_FLETCHING);
+        SendSysMessage(who, "You create some shafts and place them in your pack." );
+      endif
+    elseif (what == UOBJ_BOW)
+      if(SubtractAmount(logs, material))
+        bow := CreateItemInBackpack(who, what);
+        CheckToolWear (who, blade, BOWCRAFT_FLETCHING);
+        SendSysMessage(who, "You create a bow and place it in your pack.");
+        SetName(bow, "a bow");
+      endif
+    elseif (what == UOBJ_XBOW)
+      if(SubtractAmount(logs, material))
+        bow := CreateItemInBackpack(who, what);
+        CheckToolWear (who, blade, BOWCRAFT_FLETCHING);
+        SendSysMessage(who, "You create a crossbow and place it in your pack.");
+        SetName(bow, "a crossbow");
+      endif
+    elseif (what == UOBJ_HEAVY_XBOW)
+      if(SubtractAmount(logs, material))
+        bow := CreateItemInBackpack(who, what);
+        CheckToolWear (who, blade, BOWCRAFT_FLETCHING);
+        SendSysMessage(who, "You create a heavy crossbow and place it in your pack.");
+        SetName(bow, "a heavy crossbow");
+      endif
+    else
+      SendSysMessage(who, "I don't know how to make that.");
+      return;
+    endif
+    var myskill := CInt(AP_GetSkill(who, BOWCRAFT_FLETCHING));
+    var modpts := 0;
+    if(myskill >=  difficulty)
+      modpts := (myskill - difficulty);
+    endif
+    var rint := RandomInt(100);
+    if(modpts >= rint)
+      ExceptionalFameMod(who, myskill, difficulty, Cint(pointvalue / 2));
+      setquality(who, bow);
+    endif
+  else
+    SubtractAmount(logs, (RandomInt(5) + 1));
+    SendSysMessage(who, "You destroy some logs.");
+  endif
+endfunction
+
+function setquality(who, bow)
+  var tname := TruncateArticle(bow.name);
+  if(CInt(AP_GetSkill(who, BOWCRAFT_FLETCHING)) >= 99)
+    bow.name := "an exceptional " + tname + " [crafted by " + who.name + "]";
+  else
+    bow.name := "an exceptional " + tname;
+  endif
   bow.quality := bow.quality + 0.2;
   bow.hp := bow.maxhp;
   SendSysMessage(who, "You created an exceptional item.");
@@ -679,4 +1300,112 @@ function ExceptionalFameMod(who, skill, diff, points)
     endif
     SetNotoTitle(who, karma, fame);
   endif
+endfunction
+
+function AXE_HarvestResource( byref mobile, byref use_on )
+
+	var data_elem := 0,
+		last_harvest := 0,
+		quantity :=  0,
+		settings := 0,
+		resource_name := "",
+		sounds := 0,
+		amount := 0,
+		cfg_file := "",
+		item_desc := "";
+
+// Why is this not true? 
+//	if( RC_IsTree( use_on ) )
+		data_elem := RC_FindWoodDataElem( Cstr( use_on.x+"_"+use_on.y+"_"+use_on.z+"_"+use_on.realm ) );
+		last_harvest := RC_GetWoodProps( data_elem, "Harvest" );
+		quantity := RC_GetWoodProps( data_elem, "Quantity" );
+		settings := RC_GetSettingsCfgElem( "WoodSettings" );
+		cfg_file := RC_GetTreesCfgElem( use_on.objtype );
+		item_desc := GetConfigString( FindConfigElem( ReadConfigFile(":logs:itemdesc"), GetObjtypeByName(cfg_file.LogType) ), "Desc" );
+		resource_name := "wood";
+		//Broadcast("RC_IsTree is true");
+//	endif
+
+	quantity += Floor( Cint( ReadGameClock() - last_harvest ) / CInt( settings.SecondsPerRegrow ) );
+	if( quantity > CInt( settings.MaxYield ) )
+		quantity := CInt( settings.MaxYield );
+	endif
+
+        //Broadcast("Quantity: " + quantity + " Itemdesc: " + item_desc);
+
+	if( quantity < 1 )
+		SendSysMessage( mobile, "There are not enough "+FormatItemDescription(item_desc)+" here to harvest.", 0x3, 0x22 );
+		return 0;
+	elseif( CoordinateDistance( mobile.x, mobile.y, use_on.x, use_on.y ) > 2 )
+		SendSysMessage( mobile, "You must be closer to harvest any "+FormatItemDescription(item_desc)+"!", 0x3, 0x22 );
+		return 0;
+	endif
+
+	RC_StartCharacterTracker( mobile, mobile.x, mobile.y, mobile.realm, GetPid() );
+
+	EnableEvents(EVID_OPPONENT_MOVED);
+
+	while( quantity > 0 )
+		sounds := CInt( SplitWords( settings.EffectSounds ).RandomEntry() );
+
+		amount := CInt( CDbl( GetAttributeBaseValue( mobile, LUMBERJACKING ) / 10.0 ) / 20.0 );
+		if( amount < 1 )
+			amount := 1;
+		elseif( amount > 10 )
+			amount := 10;
+		endif
+
+                //broadcast("Amount 1: " + amount + " Quantity 1: " + quantity);
+
+		if( quantity < amount )
+			amount := CInt( quantity );
+			quantity := 0;
+		endif
+
+                //broadcast("Amount 2: " + amount + " Quantity 2: " + quantity);
+
+		if( amount < 1 )
+			SendSysMessage( mobile, "There's not enough "+FormatItemDescription(item_desc)+" here to harvest.", 0x3, 0x22 );
+			return 0;
+		endif
+
+                //broadcast("Amount 3: " + amount + " Quantity 3: " + quantity);
+
+		PerformAction( mobile, CInt( settings.EffectAction ) );
+		PlaySoundEffectXYZ( use_on.x, use_on.y, use_on.z, sounds, use_on.realm );
+
+		if( !CheckSkill( mobile, LUMBERJACKING, CInt( cfg_file.Difficulty ), 100 ) )
+			amount /= 2;
+		endif
+		SleepMS( 1900 );
+
+//		if( resource_name == "wood" )
+//			RC_HarvestFruit( mobile );
+//		endif
+
+		var create_item := CreateItemInBackpack( mobile, cfg_file.LogType, amount );
+		if( create_item )
+//			if( resource_name == "wood" )
+			SendSysMessage( mobile, "You place "+FormatItemDescription( item_desc, amount )+" in your backpack.", 0x3, 0x42 );
+//			elseif( resource_name == "clay" )
+//				SendSysMessage( mobile, "You place "+FormatItemDescription( "brick%s% of "+resource_name, amount )+" in your backpack.", 0x3, 0x42 );
+//			endif
+		else
+			//Broadcast("ERROR: "+create_item.ErrorText);
+			create_item := CreateItemAtLocation( mobile.x, mobile.y, mobile.z, cfg_file.LogType, amount, mobile.realm );
+			SendSysMessage( mobile, "Your backpack is full and the "+FormatItemDescription( item_desc, amount )+" is placed at your feet.", 0x3, 0x32 );
+		endif
+
+		quantity -= amount;
+		if( quantity < 0 )
+			quantity := 0;
+		endif
+
+		if( quantity == 0 )
+			SendSysMessage( mobile, "You have chopped all the "+FormatItemDescription(item_desc)+".", 0x3, 0x32 );
+		endif
+
+		data_elem.SetProp( "Harvest", ReadGameClock() );
+		data_elem.SetProp( "Quantity", quantity );
+	endwhile
 endfunction
